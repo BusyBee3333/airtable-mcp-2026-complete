@@ -118,6 +118,13 @@ Endpoints:
 
 Airtable enforces a 5 requests/second limit per base. This server automatically spaces requests at 220ms intervals per base to stay within the limit. Retry-After headers from 429 responses are also respected.
 
+## Resources
+
+- [Airtable Web API Reference](https://airtable.com/developers/web/api/introduction)
+- [Airtable Personal Access Tokens](https://airtable.com/account)
+- [Airtable Field Types](https://airtable.com/developers/web/api/field-model)
+- [MCP Protocol Spec](https://modelcontextprotocol.io)
+
 ## License
 
 MIT
