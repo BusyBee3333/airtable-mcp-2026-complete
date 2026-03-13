@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Airtable MCP Server — Production Quality
- * Implements 150+ tools for Airtable Web API v0
+ * Implements 290+ tools across 50 modules for Airtable Web API v0
  *
  * Tool groups:
  *   health           : health_check
@@ -59,6 +59,35 @@
  *                      list_recently_modified_records, get_record_audit_trail
  *   data_export      : export_table_to_csv, export_table_to_json, export_multiple_tables,
  *                      export_records_by_formula, get_export_summary
+ *   linked_records   : resolve_linked_records, traverse_link_chain, find_records_linking_to,
+ *                      get_bidirectional_links, resolve_linked_field_values, list_all_linked_tables
+ *   formula_builder  : build_formula, get_formula_templates, explain_formula, convert_to_formula, test_formula_on_records
+ *   select_options   : list_select_options, add_select_option, update_select_option, reorder_select_options,
+ *                      bulk_add_select_options, get_select_options_map
+ *   view_filters     : get_view_filters, set_view_filter, build_filter_set, clear_view_filters,
+ *                      apply_filter_preset, list_filter_presets
+ *   view_sorts       : get_view_sorts, set_view_sorts, add_sort_level, clear_view_sorts, build_multi_level_sort
+ *   view_groups      : get_view_groups, set_view_groups, clear_view_groups, get_grouped_record_counts, build_group_config
+ *   record_links_graph: build_record_graph, get_dependency_tree, find_orphaned_records,
+ *                      analyze_link_patterns, get_relationship_summary
+ *   form_views       : list_form_views, get_form_config, create_form_view, get_form_prefill_url,
+ *                      get_form_submission_records, update_form_settings
+ *   calendar_views   : list_calendar_views, get_calendar_config, create_calendar_view,
+ *                      get_calendar_events, get_events_by_month, update_calendar_date_field
+ *   gantt_views      : list_gantt_views, get_gantt_config, create_gantt_view,
+ *                      get_gantt_tasks, get_critical_path, update_gantt_date_fields
+ *   base_permissions : get_base_access_level, list_collaborators_with_roles, check_user_permissions,
+ *                      get_field_permissions, summarize_base_sharing
+ *   base_schema_diff : get_schema_snapshot, compare_table_schemas, detect_schema_drift,
+ *                      compare_base_fields, validate_schema
+ *   ai_fields        : list_ai_fields, get_ai_field_config, create_ai_field, update_ai_field_prompt,
+ *                      trigger_ai_generation, get_ai_field_templates
+ *   webhook_payloads : get_latest_webhook_payloads, inspect_payload_changes, get_payload_statistics,
+ *                      filter_payloads_by_table, get_payload_field_changes, refresh_webhook
+ *   trash_management : check_record_exists, get_record_deletion_status, find_recently_deleted,
+ *                      bulk_check_records, get_table_record_count, inspect_deletion_history
+ *   sync_config      : list_sync_sources_detailed, get_sync_source_health, get_sync_status_summary,
+ *                      list_sync_enabled_tables, get_sync_table_mapping, check_sync_conflicts
  *
  * Auth: AIRTABLE_ACCESS_TOKEN environment variable (personal access token)
  * Transport: stdio (default) or HTTP (MCP_TRANSPORT=http)
@@ -127,6 +156,27 @@ async function main() {
     import("./tools/view_configuration.js").then((m) => m.getTools(client)),
     import("./tools/record_history.js").then((m) => m.getTools(client)),
     import("./tools/data_export.js").then((m) => m.getTools(client)),
+    // V3 additions — 19 new tool modules (50+ total)
+    import("./tools/linked_records.js").then((m) => m.getTools(client)),
+    import("./tools/formula_builder.js").then((m) => m.getTools(client)),
+    import("./tools/select_options_management.js").then((m) => m.getTools(client)),
+    import("./tools/view_filters.js").then((m) => m.getTools(client)),
+    import("./tools/view_sorts.js").then((m) => m.getTools(client)),
+    import("./tools/view_groups.js").then((m) => m.getTools(client)),
+    import("./tools/record_links_graph.js").then((m) => m.getTools(client)),
+    import("./tools/form_views.js").then((m) => m.getTools(client)),
+    import("./tools/calendar_views.js").then((m) => m.getTools(client)),
+    import("./tools/base_permissions.js").then((m) => m.getTools(client)),
+    import("./tools/base_schema_diff.js").then((m) => m.getTools(client)),
+    import("./tools/record_locking.js").then((m) => m.getTools(client)),
+    import("./tools/ai_fields.js").then((m) => m.getTools(client)),
+    import("./tools/webhook_payloads.js").then((m) => m.getTools(client)),
+    import("./tools/trash_management.js").then((m) => m.getTools(client)),
+    import("./tools/base_migration.js").then((m) => m.getTools(client)),
+    import("./tools/rate_limit_management.js").then((m) => m.getTools(client)),
+    import("./tools/gantt_views.js").then((m) => m.getTools(client)),
+    import("./tools/select_options.js").then((m) => m.getTools(client)),
+    import("./tools/sync_configuration.js").then((m) => m.getTools(client)),
   ]);
 
   // Build handler map
