@@ -1,12 +1,21 @@
 #!/usr/bin/env node
 /**
  * Airtable MCP Server — Production Quality
- * Implements 14 tools for Airtable Web API v0
+ * Implements 48 tools for Airtable Web API v0
  *
- * Tools: health_check, list_bases, get_base_schema, list_tables,
- *        list_records, get_record, create_record, create_records,
- *        update_record, update_records, delete_record, search_records,
- *        create_table, create_field
+ * Tool groups:
+ *   health  : health_check
+ *   bases   : list_bases, get_base_schema, list_tables, update_base, delete_base, duplicate_base, list_base_collaborators
+ *   records : list_records, get_record, create_record, create_records, update_record, update_records, delete_record, search_records,
+ *             bulk_create_records, bulk_update_records, bulk_delete_records, get_record_with_linked, list_records_with_sort
+ *   metadata: create_table, create_field, get_field_metadata, list_all_tables_with_schema
+ *   tables  : get_table_schema, update_table, delete_table
+ *   fields  : list_fields, update_field, delete_field
+ *   views   : list_views, get_view, create_view, delete_view
+ *   webhooks: list_webhooks, create_webhook, delete_webhook, list_webhook_payloads
+ *   automations: list_automations, get_automation, run_automation
+ *   attachments: get_attachment_url, upload_attachment
+ *   comments: list_record_comments, create_comment, update_comment, delete_comment
  *
  * Auth: AIRTABLE_ACCESS_TOKEN environment variable (personal access token)
  * Transport: stdio (default) or HTTP (MCP_TRANSPORT=http)
@@ -47,6 +56,13 @@ async function main() {
     import("./tools/bases.js").then((m) => m.getTools(client)),
     import("./tools/records.js").then((m) => m.getTools(client)),
     import("./tools/metadata.js").then((m) => m.getTools(client)),
+    import("./tools/tables.js").then((m) => m.getTools(client)),
+    import("./tools/fields.js").then((m) => m.getTools(client)),
+    import("./tools/views.js").then((m) => m.getTools(client)),
+    import("./tools/webhooks.js").then((m) => m.getTools(client)),
+    import("./tools/automations.js").then((m) => m.getTools(client)),
+    import("./tools/attachments.js").then((m) => m.getTools(client)),
+    import("./tools/comments.js").then((m) => m.getTools(client)),
   ]);
 
   // Build handler map

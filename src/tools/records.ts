@@ -1,5 +1,7 @@
 // Airtable Record tools: list_records, get_record, create_record, create_records,
-//   update_record, update_records, delete_record, search_records
+//   update_record, update_records, delete_record, search_records,
+//   bulk_create_records, bulk_update_records, bulk_delete_records,
+//   get_record_with_linked, list_records_with_sort
 import { z } from "zod";
 import type { AirtableClient } from "../client.js";
 import type { ToolDefinition, ToolHandler } from "../types.js";
@@ -81,6 +83,53 @@ const SearchRecordsSchema = z.object({
     field: z.string(),
     direction: z.enum(["asc", "desc"]).optional(),
   })).optional().describe("Sort results"),
+  view: z.string().optional().describe("View name or ID"),
+});
+
+const BulkCreateRecordsSchema = z.object({
+  base_id: z.string().describe("Airtable base ID"),
+  table_id_or_name: z.string().describe("Table ID or name"),
+  records: z.array(z.object({ fields: z.record(z.unknown()) })).min(1).describe("Array of records to create. Batched automatically in groups of 10. Each: {fields:{Name:'Alice',Status:'Active'}}"),
+  typecast: z.boolean().optional().describe("Attempt type coercion for string values"),
+  return_fields_by_field_id: z.boolean().optional(),
+});
+
+const BulkUpdateRecordsSchema = z.object({
+  base_id: z.string().describe("Airtable base ID"),
+  table_id_or_name: z.string().describe("Table ID or name"),
+  records: z.array(z.object({
+    id: z.string(),
+    fields: z.record(z.unknown()),
+  })).min(1).describe("Array of records to update (PATCH). Batched automatically in groups of 10."),
+  typecast: z.boolean().optional(),
+});
+
+const BulkDeleteRecordsSchema = z.object({
+  base_id: z.string().describe("Airtable base ID"),
+  table_id_or_name: z.string().describe("Table ID or name"),
+  record_ids: z.array(z.string()).min(1).describe("Array of record IDs to delete. Batched automatically in groups of 10."),
+});
+
+const GetRecordWithLinkedSchema = z.object({
+  base_id: z.string().describe("Airtable base ID"),
+  table_id_or_name: z.string().describe("Table ID or name"),
+  record_id: z.string().describe("Record ID (starts with 'rec')"),
+  linked_fields: z.array(z.string()).optional().describe("Field names containing linked records to expand. Each linked record will be fetched and included."),
+  linked_table_id_or_name: z.string().optional().describe("Table where linked records live (required when expanding linked fields)"),
+});
+
+const ListRecordsWithSortSchema = z.object({
+  base_id: z.string().describe("Airtable base ID"),
+  table_id_or_name: z.string().describe("Table ID or name"),
+  sort: z.array(z.object({
+    field: z.string(),
+    direction: z.enum(["asc", "desc"]).optional().default("asc"),
+  })).min(1).describe("Sort order. Example: [{field:'CreatedTime',direction:'desc'},{field:'Name',direction:'asc'}]"),
+  fields: z.array(z.string()).optional().describe("Field names to return"),
+  filter_by_formula: z.string().optional().describe("Optional formula to filter records before sorting"),
+  max_records: z.number().min(1).optional().describe("Maximum records to return"),
+  page_size: z.number().min(1).max(100).optional().default(100).describe("Records per page (1-100)"),
+  offset: z.string().optional().describe("Pagination offset from previous response"),
   view: z.string().optional().describe("View name or ID"),
 });
 
@@ -295,6 +344,141 @@ export function getTools(client: AirtableClient): { tools: ToolDefinition[]; han
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
+    {
+      name: "bulk_create_records",
+      title: "Bulk Create Records (Unlimited)",
+      description:
+        "Create any number of records in an Airtable table, automatically batched into groups of 10 API calls. Unlike create_records (max 10), this tool handles large datasets by splitting into batches and combining results. Returns all created records.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID" },
+          table_id_or_name: { type: "string", description: "Table ID or name" },
+          records: { type: "array", items: { type: "object" }, description: "Array of records to create (any size): [{fields:{Name:'Alice',Status:'Active'}},...]" },
+          typecast: { type: "boolean", description: "Auto-convert string values to correct types" },
+        },
+        required: ["base_id", "table_id_or_name", "records"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          records: { type: "array", items: { type: "object" } },
+          createdCount: { type: "number" },
+          batchCount: { type: "number" },
+        },
+        required: ["records", "createdCount"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    {
+      name: "bulk_update_records",
+      title: "Bulk Update Records (Unlimited)",
+      description:
+        "Update any number of records in a single operation, automatically batched into groups of 10. Unlike update_records (max 10), this handles large update sets. Uses PATCH — only specified fields are changed. Returns all updated records.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID" },
+          table_id_or_name: { type: "string", description: "Table ID or name" },
+          records: { type: "array", items: { type: "object" }, description: "Array of {id:'recXXX',fields:{...}} to update (any size)" },
+          typecast: { type: "boolean" },
+        },
+        required: ["base_id", "table_id_or_name", "records"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          records: { type: "array", items: { type: "object" } },
+          updatedCount: { type: "number" },
+          batchCount: { type: "number" },
+        },
+        required: ["records", "updatedCount"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "bulk_delete_records",
+      title: "Bulk Delete Records (Unlimited)",
+      description:
+        "Delete any number of records by ID, automatically batched into groups of 10. Unlike delete_record (single), this handles bulk deletions. All deletions are permanent and cannot be undone. Use only when user explicitly requests deletion.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID" },
+          table_id_or_name: { type: "string", description: "Table ID or name" },
+          record_ids: { type: "array", items: { type: "string" }, description: "Array of record IDs to delete: ['recXXX','recYYY',...]" },
+        },
+        required: ["base_id", "table_id_or_name", "record_ids"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          deleted: { type: "array", items: { type: "object" } },
+          deletedCount: { type: "number" },
+          batchCount: { type: "number" },
+        },
+        required: ["deleted", "deletedCount"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "get_record_with_linked",
+      title: "Get Record With Linked Records",
+      description:
+        "Fetch a record and automatically expand its linked record fields. Instead of just returning record IDs for linked fields, fetches the full data for each linked record. Useful for showing complete relational data. Specify which fields to expand via linked_fields.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID" },
+          table_id_or_name: { type: "string", description: "Table ID or name" },
+          record_id: { type: "string", description: "Record ID (starts with 'rec')" },
+          linked_fields: { type: "array", items: { type: "string" }, description: "Field names with linked records to expand" },
+          linked_table_id_or_name: { type: "string", description: "Table where linked records live" },
+        },
+        required: ["base_id", "table_id_or_name", "record_id"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          createdTime: { type: "string" },
+          fields: { type: "object" },
+          linkedRecords: { type: "object" },
+        },
+        required: ["id", "fields"],
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "list_records_with_sort",
+      title: "List Records With Sort",
+      description:
+        "List records from a table with mandatory multi-field sorting. Specify one or more sort fields and directions. Supports filtering, field selection, and pagination. Use when the order of results matters (e.g., latest first, alphabetical, by priority).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID" },
+          table_id_or_name: { type: "string", description: "Table ID or name" },
+          sort: { type: "array", items: { type: "object" }, description: "Sort order (required): [{field:'Date',direction:'desc'},{field:'Name',direction:'asc'}]" },
+          fields: { type: "array", items: { type: "string" }, description: "Field names to return (default: all)" },
+          filter_by_formula: { type: "string", description: "Optional formula filter. Example: {Status}='Active'" },
+          max_records: { type: "number", description: "Max records to return" },
+          page_size: { type: "number", description: "Records per page (1-100, default 100)" },
+          offset: { type: "string", description: "Pagination offset from previous response" },
+          view: { type: "string", description: "View name or ID" },
+        },
+        required: ["base_id", "table_id_or_name", "sort"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          records: { type: "array", items: { type: "object" } },
+          offset: { type: "string" },
+        },
+        required: ["records"],
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
   ];
 
   // ============ Handlers ============
@@ -441,6 +625,180 @@ export function getTools(client: AirtableClient): { tools: ToolDefinition[]; han
       const result = await logger.time("tool.search_records", () =>
         client.get(`/v0/${base_id}/${encodeURIComponent(table_id_or_name)}?${queryParams}`)
       , { tool: "search_records", base_id, formula });
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    },
+
+    bulk_create_records: async (args) => {
+      const { base_id, table_id_or_name, records, typecast } = BulkCreateRecordsSchema.parse(args);
+
+      // Batch into groups of 10
+      const BATCH_SIZE = 10;
+      const allCreated: unknown[] = [];
+      let batchCount = 0;
+
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+        const body: Record<string, unknown> = { records: batch };
+        if (typecast !== undefined) body.typecast = typecast;
+
+        const result = await logger.time("tool.bulk_create_records.batch", () =>
+          client.post(`/v0/${base_id}/${encodeURIComponent(table_id_or_name)}`, body)
+        , { tool: "bulk_create_records", base_id, batchIndex: batchCount, batchSize: batch.length });
+
+        const batchResult = result as { records?: unknown[] };
+        if (batchResult.records) {
+          allCreated.push(...batchResult.records);
+        }
+        batchCount++;
+      }
+
+      const response = { records: allCreated, createdCount: allCreated.length, batchCount };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        structuredContent: response,
+      };
+    },
+
+    bulk_update_records: async (args) => {
+      const { base_id, table_id_or_name, records, typecast } = BulkUpdateRecordsSchema.parse(args);
+
+      const BATCH_SIZE = 10;
+      const allUpdated: unknown[] = [];
+      let batchCount = 0;
+
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+        const body: Record<string, unknown> = { records: batch };
+        if (typecast !== undefined) body.typecast = typecast;
+
+        const result = await logger.time("tool.bulk_update_records.batch", () =>
+          client.patch(`/v0/${base_id}/${encodeURIComponent(table_id_or_name)}`, body)
+        , { tool: "bulk_update_records", base_id, batchIndex: batchCount, batchSize: batch.length });
+
+        const batchResult = result as { records?: unknown[] };
+        if (batchResult.records) {
+          allUpdated.push(...batchResult.records);
+        }
+        batchCount++;
+      }
+
+      const response = { records: allUpdated, updatedCount: allUpdated.length, batchCount };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        structuredContent: response,
+      };
+    },
+
+    bulk_delete_records: async (args) => {
+      const { base_id, table_id_or_name, record_ids } = BulkDeleteRecordsSchema.parse(args);
+
+      const BATCH_SIZE = 10;
+      const allDeleted: unknown[] = [];
+      let batchCount = 0;
+
+      for (let i = 0; i < record_ids.length; i += BATCH_SIZE) {
+        const batch = record_ids.slice(i, i + BATCH_SIZE);
+        const queryParams = new URLSearchParams();
+        batch.forEach((id) => queryParams.append("records[]", id));
+
+        const result = await logger.time("tool.bulk_delete_records.batch", () =>
+          client.delete(
+            `/v0/${base_id}/${encodeURIComponent(table_id_or_name)}?${queryParams}`
+          )
+        , { tool: "bulk_delete_records", base_id, batchIndex: batchCount, batchSize: batch.length });
+
+        const batchResult = result as { records?: unknown[] };
+        if (batchResult.records) {
+          allDeleted.push(...batchResult.records);
+        }
+        batchCount++;
+      }
+
+      const response = { deleted: allDeleted, deletedCount: allDeleted.length, batchCount };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        structuredContent: response,
+      };
+    },
+
+    get_record_with_linked: async (args) => {
+      const { base_id, table_id_or_name, record_id, linked_fields, linked_table_id_or_name } =
+        GetRecordWithLinkedSchema.parse(args);
+
+      // Fetch the primary record
+      const record = await logger.time("tool.get_record_with_linked", () =>
+        client.get(`/v0/${base_id}/${encodeURIComponent(table_id_or_name)}/${record_id}`)
+      , { tool: "get_record_with_linked", base_id, record_id });
+
+      const primaryRecord = record as { id: string; createdTime: string; fields: Record<string, unknown> };
+      const linkedRecordsMap: Record<string, unknown[]> = {};
+
+      // Expand linked fields if requested
+      if (linked_fields && linked_fields.length > 0 && linked_table_id_or_name) {
+        for (const fieldName of linked_fields) {
+          const linkedIds = primaryRecord.fields[fieldName];
+          if (Array.isArray(linkedIds) && linkedIds.length > 0) {
+            const linkedData: unknown[] = [];
+
+            // Fetch each linked record
+            for (const linkedId of linkedIds) {
+              if (typeof linkedId === "string" && linkedId.startsWith("rec")) {
+                try {
+                  const linkedRecord = await client.get(
+                    `/v0/${base_id}/${encodeURIComponent(linked_table_id_or_name)}/${linkedId}`
+                  );
+                  linkedData.push(linkedRecord);
+                } catch {
+                  linkedData.push({ id: linkedId, error: "Could not fetch linked record" });
+                }
+              }
+            }
+            linkedRecordsMap[fieldName] = linkedData;
+          }
+        }
+      }
+
+      const response = {
+        ...primaryRecord,
+        linkedRecords: linkedRecordsMap,
+      };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        structuredContent: response,
+      };
+    },
+
+    list_records_with_sort: async (args) => {
+      const { base_id, table_id_or_name, sort, fields, filter_by_formula, max_records, page_size, offset, view } =
+        ListRecordsWithSortSchema.parse(args);
+
+      const queryParams = new URLSearchParams();
+      queryParams.set("pageSize", String(page_size));
+
+      sort.forEach((s, i) => {
+        queryParams.set(`sort[${i}][field]`, s.field);
+        queryParams.set(`sort[${i}][direction]`, s.direction || "asc");
+      });
+
+      if (filter_by_formula) queryParams.set("filterByFormula", filter_by_formula);
+      if (max_records) queryParams.set("maxRecords", String(max_records));
+      if (offset) queryParams.set("offset", offset);
+      if (view) queryParams.set("view", view);
+      if (fields) {
+        fields.forEach((f) => queryParams.append("fields[]", f));
+      }
+
+      const result = await logger.time("tool.list_records_with_sort", () =>
+        client.get(`/v0/${base_id}/${encodeURIComponent(table_id_or_name)}?${queryParams}`)
+      , { tool: "list_records_with_sort", base_id, sortFields: sort.map((s) => s.field) });
 
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
