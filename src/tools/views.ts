@@ -32,6 +32,25 @@ const DeleteViewSchema = z.object({
   view_id: z.string().describe("View ID (starts with 'viw') to delete"),
 });
 
+// ============ New Schemas (round 2) ============
+
+const GetViewRecordsSchema = z.object({
+  base_id: z.string().describe("Airtable base ID (starts with 'app')"),
+  table_id_or_name: z.string().describe("Table ID or name"),
+  view_id_or_name: z.string().describe("View ID (starts with 'viw') or view name"),
+  fields: z.array(z.string()).optional().describe("Field names to return (default: all fields visible in the view)"),
+  max_records: z.number().min(1).max(100000).optional().describe("Max records to return"),
+  page_size: z.number().min(1).max(100).optional().default(100).describe("Records per page (1-100, default 100)"),
+  offset: z.string().optional().describe("Pagination offset from previous response"),
+});
+
+const UpdateViewFilterSchema = z.object({
+  base_id: z.string().describe("Airtable base ID (starts with 'app')"),
+  table_id: z.string().describe("Table ID (starts with 'tbl')"),
+  view_id: z.string().describe("View ID (starts with 'viw') to update. Note: Only personal views owned by the token's user can be updated via the API."),
+  filter_by_formula: z.string().describe("New filter formula to apply to the view. Example: AND({Status}='Active',{Priority}='High')"),
+});
+
 // ============ Tool Definitions ============
 
 export function getTools(client: AirtableClient): { tools: ToolDefinition[]; handlers: Record<string, ToolHandler> } {
@@ -143,6 +162,63 @@ export function getTools(client: AirtableClient): { tools: ToolDefinition[]; han
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
+    // ── Round 2 additions ──
+    {
+      name: "get_view_records",
+      title: "Get View Records",
+      description:
+        "Fetch records for a specific view with that view's filters, sort, and field visibility automatically applied by Airtable. Similar to list_records_by_view but from the views tool group. Returns records exactly as configured in the view. Use to replicate the data a user sees in a particular view. Supports pagination.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID (starts with 'app')" },
+          table_id_or_name: { type: "string", description: "Table ID or name" },
+          view_id_or_name: { type: "string", description: "View ID (starts with 'viw') or view name" },
+          fields: { type: "array", items: { type: "string" }, description: "Fields to return (default: all visible in view)" },
+          max_records: { type: "number", description: "Max records to return" },
+          page_size: { type: "number", description: "Records per page (1-100, default 100)" },
+          offset: { type: "string", description: "Pagination offset from previous response" },
+        },
+        required: ["base_id", "table_id_or_name", "view_id_or_name"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          records: { type: "array", items: { type: "object" } },
+          offset: { type: "string" },
+          view: { type: "string" },
+          recordCount: { type: "number" },
+        },
+        required: ["records"],
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "update_view_filter",
+      title: "Update View Filter",
+      description:
+        "Update the filter formula of a personal view in Airtable. Only personal views (owned by the API token's user) can be updated via the API — shared/collaborative views require the Airtable web app. Provide a new filterByFormula expression. Returns the updated view metadata. Note: View filter updates may have limited API support depending on your Airtable plan.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          base_id: { type: "string", description: "Airtable base ID (starts with 'app')" },
+          table_id: { type: "string", description: "Table ID (starts with 'tbl')" },
+          view_id: { type: "string", description: "View ID (starts with 'viw') — must be a personal view owned by the token user" },
+          filter_by_formula: { type: "string", description: "New filter formula. Example: AND({Status}='Active',{Priority}='High')" },
+        },
+        required: ["base_id", "table_id", "view_id", "filter_by_formula"],
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          type: { type: "string" },
+        },
+        required: ["id"],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
   ];
 
   // ============ Handlers ============
@@ -221,6 +297,70 @@ export function getTools(client: AirtableClient): { tools: ToolDefinition[]; han
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result,
       };
+    },
+
+    // ── Round 2 handlers ──
+
+    get_view_records: async (args) => {
+      const { base_id, table_id_or_name, view_id_or_name, fields, max_records, page_size, offset } =
+        GetViewRecordsSchema.parse(args);
+
+      const queryParams = new URLSearchParams();
+      queryParams.set("view", view_id_or_name);
+      queryParams.set("pageSize", String(page_size ?? 100));
+      if (max_records) queryParams.set("maxRecords", String(max_records));
+      if (offset) queryParams.set("offset", offset);
+      if (fields) fields.forEach((f) => queryParams.append("fields[]", f));
+
+      const result = await logger.time("tool.get_view_records", () =>
+        client.get(`/v0/${base_id}/${encodeURIComponent(table_id_or_name)}?${queryParams}`)
+      , { tool: "get_view_records", base_id, view: view_id_or_name });
+
+      const raw = result as { records?: unknown[]; offset?: string };
+      const records = raw.records ?? [];
+      const response = {
+        records,
+        offset: raw.offset,
+        view: view_id_or_name,
+        recordCount: records.length,
+      };
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+        structuredContent: response,
+      };
+    },
+
+    update_view_filter: async (args) => {
+      const { base_id, table_id, view_id, filter_by_formula } = UpdateViewFilterSchema.parse(args);
+
+      // Airtable Metadata API: PATCH /v0/meta/bases/{baseId}/tables/{tableId}/views/{viewId}
+      // This is supported for personal views in the API
+      const body = { filterByFormula: filter_by_formula };
+
+      try {
+        const result = await logger.time("tool.update_view_filter", () =>
+          client.patch(`/v0/meta/bases/${base_id}/tables/${table_id}/views/${view_id}`, body)
+        , { tool: "update_view_filter", base_id, table_id, view_id });
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          structuredContent: result,
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const response = {
+          error: errorMessage,
+          view_id,
+          attempted_formula: filter_by_formula,
+          note: "View filter updates via API require a personal view owned by the token user. Collaborative views must be updated in the Airtable web app.",
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(response, null, 2) }],
+          structuredContent: response,
+          isError: true,
+        };
+      }
     },
   };
 

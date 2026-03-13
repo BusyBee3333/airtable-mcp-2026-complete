@@ -4,18 +4,25 @@
  * Implements 48 tools for Airtable Web API v0
  *
  * Tool groups:
- *   health  : health_check
- *   bases   : list_bases, get_base_schema, list_tables, update_base, delete_base, duplicate_base, list_base_collaborators
- *   records : list_records, get_record, create_record, create_records, update_record, update_records, delete_record, search_records,
- *             bulk_create_records, bulk_update_records, bulk_delete_records, get_record_with_linked, list_records_with_sort
- *   metadata: create_table, create_field, get_field_metadata, list_all_tables_with_schema
- *   tables  : get_table_schema, update_table, delete_table
- *   fields  : list_fields, update_field, delete_field
- *   views   : list_views, get_view, create_view, delete_view
- *   webhooks: list_webhooks, create_webhook, delete_webhook, list_webhook_payloads
- *   automations: list_automations, get_automation, run_automation
- *   attachments: get_attachment_url, upload_attachment
- *   comments: list_record_comments, create_comment, update_comment, delete_comment
+ *   health      : health_check
+ *   bases       : list_bases, get_base_schema, list_tables, update_base, delete_base, duplicate_base, list_base_collaborators
+ *   records     : list_records, get_record, create_record, create_records, update_record, update_records, delete_record, search_records,
+ *                 bulk_create_records, bulk_update_records, bulk_delete_records, get_record_with_linked, list_records_with_sort,
+ *                 list_records_by_view, list_records_with_formula, list_records_grouped, upsert_records,
+ *                 list_records_changed_since, link_records, unlink_records
+ *   metadata    : create_table, create_field, get_field_metadata, list_all_tables_with_schema
+ *   tables      : get_table_schema, update_table, delete_table, list_tables_with_record_count, create_table_from_schema
+ *   fields      : list_fields, update_field, delete_field, list_field_types, create_select_field, add_select_option,
+ *                 create_formula_field, create_rollup_field, create_linked_field
+ *   views       : list_views, get_view, create_view, delete_view, get_view_records, update_view_filter
+ *   webhooks    : list_webhooks, create_webhook, delete_webhook, list_webhook_payloads
+ *   automations : list_automations, get_automation, run_automation
+ *   attachments : get_attachment_url, upload_attachment
+ *   comments    : list_record_comments, create_comment, update_comment, delete_comment
+ *   search      : search_records_fulltext, find_records_by_field, find_duplicate_records
+ *   formulas    : validate_formula, list_formula_functions, calculate_formula
+ *   sync        : list_sync_sources, get_sync_source_schema
+ *   interfaces  : list_interfaces
  *
  * Auth: AIRTABLE_ACCESS_TOKEN environment variable (personal access token)
  * Transport: stdio (default) or HTTP (MCP_TRANSPORT=http)
@@ -63,6 +70,11 @@ async function main() {
     import("./tools/automations.js").then((m) => m.getTools(client)),
     import("./tools/attachments.js").then((m) => m.getTools(client)),
     import("./tools/comments.js").then((m) => m.getTools(client)),
+    // Round 2 additions
+    import("./tools/search.js").then((m) => m.getTools(client)),
+    import("./tools/formulas.js").then((m) => m.getTools(client)),
+    import("./tools/sync.js").then((m) => m.getTools(client)),
+    import("./tools/interfaces.js").then((m) => m.getTools(client)),
   ]);
 
   // Build handler map
